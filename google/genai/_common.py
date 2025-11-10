@@ -561,6 +561,39 @@ class BaseModel(pydantic.BaseModel):
       ignored_types=(typing.TypeVar,),
   )
 
+  @pydantic.model_validator(mode='before')
+  @classmethod
+  def _check_field_type_mismatches(cls, data: Any) -> Any:
+    """Check for type mismatches and warn before Pydantic processes the data."""
+    # Check each field for type mismatches
+    for field_name, field_info in cls.model_fields.items():
+      value = data.get(field_name)
+      if value is None:
+        continue
+
+      # Get the expected type, unwrapping Optional
+      expected_type = field_info.annotation
+      origin = get_origin(expected_type)
+
+      if origin is Union:
+        args = get_args(expected_type)
+        non_none_types = [arg for arg in args if arg is not type(None)]
+        if len(non_none_types) == 1:
+          expected_type = non_none_types[0]
+
+      # Only warn if expected type is a Pydantic BaseModel subclass
+      # and the actual value is also a Pydantic model (not dict/primitive)
+      if (isinstance(expected_type, type) and
+          issubclass(expected_type, pydantic.BaseModel) and
+          isinstance(value, pydantic.BaseModel) and
+          not isinstance(value, expected_type)):
+        logger.warning(
+            f"Type mismatch in {cls.__name__}.{field_name}: "
+            f"expected {expected_type.__name__}, got {type(value).__name__}"
+        )
+
+    return data
+
   def __repr__(self) -> str:
     try:
       return _pretty_repr(self)
